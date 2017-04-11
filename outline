@@ -1,0 +1,6 @@
+open input tsv
+store input fields (WorkOrder	DNA WorkingDirectory)
+cwd to WorkingDirectory
+open yaml file
+pull required fields from yaml file
+return input fields and yaml-fields in results file
