@@ -3,6 +3,7 @@ import yaml
 import os
 import csv
 import time
+import glob
 import argparse
 parser = argparse.ArgumentParser()
 
@@ -15,7 +16,9 @@ args = parser.parse_args()
 
 results = {}
 header_line = []
+
 date = time.strftime( "%m/%d/%Y" )
+out_all = args.out + '.build38.all.tsv'
 
 wd = os.getcwd()
 cwd = os.getcwd()
@@ -29,6 +32,7 @@ input_fields = [
     'WorkingDirectory'
 ]
 yaml_fields = [
+    'SAMPLE_ALIAS',
     'ALIGNED_READS',
     'ALIGNMENT_RATE',
     'FIRST_OF_PAIR_MISMATCH_RATE',
@@ -36,53 +40,101 @@ yaml_fields = [
     'FREEMIX',
     'CHIPMIX',
     'HAPLOID_COVERAGE',
+    'PCT_10X',
+    'PCT_20X',
+    'TOTAL_BASES_Q20_OR_MORE',
+    'discordant_rate',
+    'interchromosomal_rate',
     'HET_SNP_Q',
     'HET_SNP_SENSITIVITY',
     'MEAN_COVERAGE',
     'MEAN_INSERT_SIZE',
     'STANDARD_DEVIATION',
-    'PCT_10X',
-    'PCT_20X',
     'PCT_ADAPTER',
     'PF_READS',
     'PF_ALIGNED_BASES',
-    'TOTAL_BASES_Q20_OR_MORE',
     'TOTAL_PERCENT_DUPLICATION',
     'TOTAL_READS',
-    'discordant_rate',
-    'interchromosomal_rate',
     'reads_mapped_as_singleton_percentage',
     'reads_mapped_in_proper_pairs_percentage',
 ]
 
+cram_header = [ 'cram', 'cram.md5' ]
 pair_header = [ 'PF_HQ_ALIGNED_Q20_BASES', 'STATUS' ]
+fail_header = [ 'QC Failed Metrics']
 
 def get_yaml( path ):
     file_name = '/qc_metrics.yaml'
     new_path = path + file_name
     with open( new_path ) as data:
         yaml_values = yaml.load_all( data )
+        fails = []
+        fail_met = []
         for yamlv in yaml_values:
             results[ 'PF_HQ_ALIGNED_Q20_BASES' ] = yamlv[ 'PAIR' ][ 'PF_HQ_ALIGNED_Q20_BASES' ]
 
             if( args.ccdg ):
-                if ( yamlv[ 'FREEMIX' ] < 0.05 and yamlv[ 'HAPLOID_COVERAGE' ] >= 19.5 and yamlv[ 'discordant_rate' ] < 0.05
+                if ( yamlv[ 'FREEMIX' ] < 0.05 and yamlv[ 'HAPLOID_COVERAGE' ] >= 19.5 and yamlv[ 'discordant_rate' ] < 5
                      and yamlv[ 'interchromosomal_rate' ] < 0.05 and yamlv[ 'FIRST_OF_PAIR_MISMATCH_RATE' ] < 0.05
                      and yamlv[ 'SECOND_OF_PAIR_MISMATCH_RATE' ] < 0.05 ):
                     results[ 'STATUS' ] = 'pass'
                 else:
                     results[ 'STATUS' ] = 'fail'
+            
+                if ( yamlv[ 'FREEMIX' ] > 0.05 ):
+                        fail_met.append( 'FREEMIX' )
+                
+                if ( yamlv[ 'HAPLOID_COVERAGE' ] < 19.5 ):
+                        fail_met.append( 'HAPLOID_COVERAGE' )
 
-            elif( args.tm ):
-                if (yamlv[ 'FREEMIX' ] < 0.01 and yamlv[ 'HAPLOID_COVERAGE' ] >= 30
-                    and yamlv[ 'TOTAL_BASES_Q20_OR_MORE' ] >= 86,000,000,000
-                    and yamlv[ 'PCT_10X' ] > 0.95 and yamlv[ 'PCT_20X' ] > 0.90
-                    and yamlv[ 'CHIPIX' ] < 0.01):
+                if ( yamlv[ 'discordant_rate' ] > 5 ):
+                        fail_met.append( 'discordant_rate' )
+
+                if ( yamlv[ 'interchromosomal_rate' ] > 0.05 ):
+                        fail_met.append( 'interchromosomal_rate' )
+
+                if ( yamlv[ 'FIRST_OF_PAIR_MISMATCH_RATE' ] > 0.05 ):
+                        fail_met.append( 'FIRST_OF_PAIR_MISMATCH_RATE' )
+
+                if ( yamlv[ 'SECOND_OF_PAIR_MISMATCH_RATE' ] > 0.05 ):
+                        fail_met.append( 'SECOND_OF_PAIR_MISMATCH_RATE' )  
+          
+                if ( len(fail_met) == 0 ):
+                    fail_met.append( 'NA' )
+
+            fails = ','.join(fail_met)
+            results[ 'QC Failed Metrics' ] = fails
+
+            if ( args.tm ):
+                if ( yamlv[ 'FREEMIX' ] < 0.01 and yamlv[ 'HAPLOID_COVERAGE' ] >= 30
+                    and yamlv[ 'TOTAL_BASES_Q20_OR_MORE' ] >= 86000000000
+                    and yamlv[ 'PCT_10X' ] > 0.95 and yamlv[ 'PCT_20X' ] > 0.90 ):
                     results[ 'STATUS' ] = 'pass'
                 else:
                     results[ 'STATUS' ] = 'fail'
+            
+                if ( yamlv[ 'FREEMIX' ] > 0.01):
+                    fail_met.append( 'FREEMIX' )
 
-            for k, v in yamlv.items():
+                if ( yamlv[ 'HAPLOID_COVERAGE' ] < 30 ):
+                    fail_met.append( 'HAPLOID_COVERAGE' )
+
+                if ( yamlv[ 'TOTAL_BASES_Q20_OR_MORE' ] < 86000000000 ):
+                    fail_met.append( 'TOTAL_BASES_Q20_OR_MORE' )
+
+                if ( yamlv[ 'PCT_10X' ] < 0.95 ):
+                    fail_met.append(  'PCT_10X' )
+
+                if ( yamlv[ 'PCT_20X' ] < 0.90 ):
+                    fail_met.append( 'PCT_20X' )
+
+                if ( len(fail_met) == 0 ):
+                    fail_met.append( 'NA' )
+
+            fails = ','.join(fail_met)
+            results[ 'QC Failed Metrics' ] = fails
+
+            for k, v in yamlv.items():                
                 for field in yaml_fields:
                     if ( k == field ):
                         results[k] = v
@@ -99,15 +151,46 @@ def get_read_groups( path ):
             read_groups.add( line[ 'RG' ] )
     return read_groups
 
-with open( args.file ) as csvfile, open( args.out, 'w' ) as outfile: 
+def get_cram ( path ):
+    cram_path = path + '/*.cram'
+    if glob.glob( cram_path ):
+        for cram in glob.glob( cram_path ):
+            results[ 'cram' ] = cram
+    else:
+        results[ 'cram' ] = 'NA'
+
+    md5_path = path + '/*cram.md5'
+    if glob.glob( md5_path ):
+        for md5 in glob.glob( md5_path ):
+            results[ 'cram.md5'] = md5
+    else:
+        results[ 'cram.md5' ] = 'NA'
+            
+
+with open( args.file ) as csvfile, open( out_all, 'w' ) as outfile: 
 
     reader = csv.DictReader( csvfile, delimiter="\t" )
-    header_fields = input_fields + yaml_fields + pair_header
+
+    header_fields = input_fields + cram_header + yaml_fields + pair_header + fail_header
     w = csv.DictWriter( outfile, header_fields, delimiter="\t" )
     w.writeheader()
 
+    fail_file = args.out + '.build38.yamlfail.tsv'
+    fail = open(fail_file, 'w')
+    fail_print = False
+
+    pass_file = args.out + '.build38.qcpass.tsv'
+    passfh = open(pass_file, 'w')
+    wr = csv.DictWriter( passfh, header_fields, delimiter="\t" )
+    wr.writeheader()
+
+    samplemap = args.out + '.qcpass.samplemap.tsv'
+    sm = open(samplemap, 'w')
 
     for line in reader:
+
+        line = {k.replace(' ', ''): v for k, v in line.items() if k is not None}
+
         results[ 'WorkOrder' ] = line[ 'WorkOrder' ]
         results[ 'date_QC' ] = date
         results[ 'DNA' ] = line[ 'DNA' ]
@@ -115,11 +198,13 @@ with open( args.file ) as csvfile, open( args.out, 'w' ) as outfile:
 
         file_name = '/qc_metrics.yaml'
         new_path =  line[ 'WorkingDirectory' ] + file_name
-
+        
         if  os.path.exists( new_path )==True:
 
             yaml_dict = get_yaml( line[ 'WorkingDirectory' ] )
             read_groups = get_read_groups( line[ 'WorkingDirectory' ] )
+            get_cram( line[ 'WorkingDirectory' ] )
+         
             css = ','.join( sorted( read_groups ) ) # comma-separated string
             count = len( read_groups )
 
@@ -130,12 +215,22 @@ with open( args.file ) as csvfile, open( args.out, 'w' ) as outfile:
 
             w.writerow( results )
 
+            if results[ 'STATUS' ] == 'pass':
+                sm.write( results[ 'DNA' ] + "\t" + results[ 'cram' ] + "\t" + results[ 'cram.md5' ] + "\n" )
+                wr.writerow( results )
+
         else:
+            fail_print = True
             nofile = 'NA'
             print( results[ 'WorkOrder' ] + "\t" + results[ 'date_QC' ] + "\t" + results[ 'DNA' ]
                   + "\t" + results[ 'WorkingDirectory' ] + "\t" + nofile )
-            outfile.write( results[ 'WorkOrder' ] + "\t" + results[ 'date_QC' ] + "\t" + results[ 'DNA' ]
-                          + "\t\t\t" + results[ 'WorkingDirectory' ] + "\t" + nofile + "\n" )
+            fail.write( results[ 'WorkOrder' ] + "\t" + results[ 'date_QC' ] + "\t" + results[ 'DNA' ]
+                          + "\t" + results[ 'WorkingDirectory' ] + "\t" + nofile + "\n" )
+        
 
+if ( fail_print == True ):
+    print( 'Samples without yaml files output to: ' + fail_file )
+else:
+    print( 'All yaml files exist' )
 
 exit()
